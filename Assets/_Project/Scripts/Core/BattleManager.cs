@@ -2,24 +2,40 @@ using UnityEngine;
 
 public class BattleManager : MonoBehaviour
 {
+    public Unit targetEnemy;
     private void Update()
     {
         // 키보드 1번을 누르면 ID 1101 스킬을 사용하는 테스트
         if (Input.GetKeyDown(KeyCode.Alpha1))
         {
-            UseSkill(1101);
+            UseSkill(1101); // 파이어볼
+        }
+
+        // 2번 격폭
+        if (Input.GetKeyDown(KeyCode.Alpha2))
+        {
+            UseSkill(1102); // 격폭
         }
     }
 
     public void UseSkill(int skillID)
     {
-        // SkillManager에서 데이터 가져오기
-        SkillData data = SkillManager.Instance.GetSkill(skillID);
+        if (targetEnemy == null) return;
 
-        if (data != null)
+        SkillData data = SkillManager.Instance.GetSkill(skillID);
+        if (data == null) return;
+
+        // 데이터에 적힌 키로 명령어를 가져옵니다.
+        ICommand command = CommandFactory.GetCommand(data.CommandKey);
+
+        // 명령어가 있다면 실행합니다.
+        if (command != null)
         {
-            Debug.Log($"<color=cyan>[전투]</color> {data.Name} 발동! 위력: {data.Power}, 소모 AP: {data.AP_Cost}");
-            // 여기서 나중에 Command_Key를 보고 실제 로직(화상, 격폭 등)을 실행하게 됩니다.
+            command.Execute(null, targetEnemy, data); // 현재 caster는 임시로 null
+        }
+        else
+        {
+            Debug.LogError($"{data.CommandKey}에 해당하는 명령어를 찾을 수 없습니다.");
         }
     }
 }

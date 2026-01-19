@@ -1,0 +1,3 @@
+ID,Name,AP_Cost,Power,CommandKey
+1101,파이어볼,2,20,Cmd_Attack_Burn
+1102,격폭,1,10,Cmd_Detonate

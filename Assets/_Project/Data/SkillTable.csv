@@ -1,3 +1,3 @@
-ID,Name,AP_Cost,Power,CommandKey
-1101,���̾,2,20,Cmd_Attack_Burn
-1102,����,1,10,Cmd_Detonate
+ID,Name,Description,AP_Cost,Power,CoolTime,CommandKey
+1101,파이어볼,화상을 입힙니다,2,20,0,Cmd_Attack_Burn
+1102,격폭,화상을 터뜨립니다,1,10,2,Cmd_Detonate

@@ -1,19 +1,24 @@
 using UnityEngine;
 using System.Collections;
 using System.Collections.Generic;
+using Photon.Pun;
 
-public class BattleManager : MonoBehaviour
+
+public class BattleManager : MonoBehaviourPunCallbacks
 {
     public static BattleManager Instance;
 
-    [Header("현재 전투 상태")]
+    [Header("전투 상태")]
     public BattleState currentState;
 
-    [Header("유닛 연결")]
-    public Unit playerUnit;
-    public Unit enemyUnit;
+    [Header("아군 유닛")]
+    public Unit p1Unit; // 방장(MasterClient) 캐릭터
+    public Unit p2Unit; // 참가자(Client) 캐릭터
 
-    // [Key: 스킬ID, Value: 남은 턴 수]
+    [Header("적 유닛")]
+    public Unit enemyBoss; // AI 보스 몬스터
+
+    // 쿨타임 관리 (플레이어별 분리 혹은 통합 관리 가능)
     private Dictionary<int, int> skillCooldowns = new Dictionary<int, int>();
 
     private void Awake()
@@ -24,65 +29,123 @@ public class BattleManager : MonoBehaviour
 
     private void Start()
     {
-        ChangeState(BattleState.Start);
+        if (PhotonNetwork.IsConnected)
+            ChangeState(BattleState.Start);
+    }
+
+    // [권한 설정] 방에 입장했을 때 각 플레이어의 유닛 소유권을 확정합니다.
+    public override void OnJoinedRoom()
+    {
+        if (PhotonNetwork.IsMasterClient)
+        {
+            Debug.Log("[시스템] 방장입니다. P1 캐릭터를 조종합니다.");
+        }
+        else
+        {
+            Debug.Log("[시스템] 참가자입니다. P2 캐릭터의 권한을 요청합니다.");
+            // P2 유닛의 소유권을 참가자(Client)에게 넘깁니다.
+            p2Unit.SetOwner(PhotonNetwork.LocalPlayer);
+        }
     }
 
     private void Update()
     {
-        if (currentState == BattleState.PlayerTurn)
-        {
-            if (Input.GetKeyDown(KeyCode.Alpha1)) UseSkill(1101); // 파이어볼
-            if (Input.GetKeyDown(KeyCode.Alpha2)) UseSkill(1102); // 격폭
-
-            // 스페이스바를 누르면 남은 AP와 상관없이 적에게 턴을 넘깁니다.
-            if (Input.GetKeyDown(KeyCode.Space))
-            {
-                Debug.Log("[시스템] 플레이어가 수동으로 턴을 종료했습니다.");
-                EndTurn();
-            }
-        }
-    }
-    // 수동으로 턴을 종료하는 함수
-    public void EndTurn()
-    {
         if (currentState != BattleState.PlayerTurn) return;
 
-        // 현재 플레이어의 남은 AP를 0으로 만들고 적의 턴으로 넘깁니다.
-        playerUnit.CurrentAP = 0;
-        BattleUI.Instance.UpdateAP(0, playerUnit.MaxAP); // UI도 0으로 갱신
+        // [협동 입력 로직] 내가 주인인 캐릭터의 턴일 때만 조종 가능
+        if (PhotonNetwork.IsMasterClient && p1Unit.IsMine)
+        {
+            HandleInput(1); // 방장 입력 (P1)
+        }
+        else if (!PhotonNetwork.IsMasterClient && p2Unit.IsMine)
+        {
+            HandleInput(2); // 참가자 입력 (P2)
+        }
+    }
 
+    private void HandleInput(int playerNum)
+    {
+        if (Input.GetKeyDown(KeyCode.Alpha1)) RequestUseSkill(1101, playerNum);
+        if (Input.GetKeyDown(KeyCode.Alpha2)) RequestUseSkill(1102, playerNum);
+        if (Input.GetKeyDown(KeyCode.Space)) RequestEndTurn();
+    }
+
+    // --- [네트워크] 스킬 사용 요청 ---
+    public void RequestUseSkill(int skillID, int playerNum)
+    {
+        // 쿨타임/AP 체크는 로컬에서 먼저 수행하여 반응속도 확보
+        Unit attacker = (playerNum == 1) ? p1Unit : p2Unit;
+        SkillData data = SkillManager.Instance.GetSkill(skillID);
+
+        if (attacker.CurrentAP < data.AP_Cost) return;
+
+        // 모든 클라이언트에 스킬 실행 방송
+        photonView.RPC("SyncSkill", RpcTarget.All, skillID, playerNum);
+    }
+
+    [PunRPC]
+    public void SyncSkill(int skillID, int playerNum)
+    {
+        Unit attacker = (playerNum == 1) ? p1Unit : p2Unit;
+        Unit target = enemyBoss; // PvE이므로 타겟은 항상 보스
+
+        SkillData data = SkillManager.Instance.GetSkill(skillID);
+        if (data == null) return;
+
+        Debug.Log($"[전투] Player {playerNum}이(가) {data.Name} 사용!");
+
+        ChangeState(BattleState.Action);
+        attacker.ConsumeAP(data.AP_Cost);
+
+        ICommand command = CommandFactory.GetCommand(data.CommandKey);
+        if (command != null)
+        {
+            command.Execute(attacker, target, data);
+            // UI 업데이트 (P1, P2, 몬스터 전체 상태 갱신)
+            BattleUI.Instance.UpdateAllUI(p1Unit, p2Unit, enemyBoss);
+            StartCoroutine(PostActionRoutine());
+        }
+    }
+
+    // --- [네트워크] 턴 종료 로직 ---
+    public void RequestEndTurn()
+    {
+        // 개별 턴 종료가 아니라 팀 전체 턴 종료를 위해 RPC 호출
+        photonView.RPC("SyncEndTurn", RpcTarget.All);
+    }
+
+    [PunRPC]
+    public void SyncEndTurn()
+    {
+        Debug.Log("[전투] 아군 턴이 종료되었습니다.");
+        p1Unit.CurrentAP = 0;
+        p2Unit.CurrentAP = 0;
         ChangeState(BattleState.EnemyTurn);
     }
+
+    // --- 상태 관리 ---
     public void ChangeState(BattleState newState)
     {
         currentState = newState;
 
+        // UI에 현재 상태 표시
         if (BattleUI.Instance != null)
-        {
             BattleUI.Instance.SetTurnMessage($"{newState}");
-            BattleUI.Instance.UpdateAllUI(playerUnit, enemyUnit);
-        }
 
         switch (currentState)
         {
             case BattleState.Start:
+                // 게임 시작 시 증강 선택 단계로 진입
+                ChangeState(BattleState.AugmentSelect);
+                break;
+            case BattleState.AugmentSelect:
+                // 증강 패널 활성화 로직 (추후 구현)
+                Debug.Log("[로그라이크] 증강을 선택하세요.");
+                // 예시: 두 명 모두 선택 완료 시 PlayerTurn으로 전환
                 StartCoroutine(SetupBattle());
                 break;
-
-            case BattleState.PlayerTurn:
-                Debug.Log($"[플레이어 턴] 행동 대기 중... (남은 AP: {playerUnit.CurrentAP})");
-                break;
-
             case BattleState.EnemyTurn:
-                StartCoroutine(EnemyRoutine());
-                break;
-            case BattleState.Win:
-                Debug.Log("전투에서 승리했습니다!");
-                BattleUI.Instance.ShowResult("VICTORY", Color.yellow);
-                break;
-            case BattleState.Lose:
-                Debug.Log("전투에서 패배했습니다...");
-                BattleUI.Instance.ShowResult("DEFEAT", Color.red);
+                StartCoroutine(MonsterAIRoutine());
                 break;
         }
     }
@@ -90,95 +153,80 @@ public class BattleManager : MonoBehaviour
     private IEnumerator SetupBattle()
     {
         yield return new WaitForSeconds(1f);
-        playerUnit.ResetAP();
-        skillCooldowns.Clear(); // 새로운 전투 시작 시 쿨타임 초기화
+        p1Unit.ResetAP();
+        p2Unit.ResetAP();
         ChangeState(BattleState.PlayerTurn);
-    }
-
-    public void UseSkill(int skillID)
-    {
-        if (currentState != BattleState.PlayerTurn) return;
-
-        // 쿨타임 체크
-        if (skillCooldowns.ContainsKey(skillID) && skillCooldowns[skillID] > 0)
-        {
-            Debug.LogWarning($"[실패] 해당 스킬은 아직 쿨타임 중입니다! (남은 턴: {skillCooldowns[skillID]})");
-            return;
-        }
-
-        SkillData data = SkillManager.Instance.GetSkill(skillID);
-        if (data == null) return;
-
-        // AP 체크
-        if (playerUnit.CurrentAP < data.AP_Cost)
-        {
-            Debug.LogWarning($"[실패] AP가 부족합니다.");
-            return;
-        }
-
-        // 모든 검증 통과 - 실행 시작
-        ChangeState(BattleState.Action);
-        playerUnit.ConsumeAP(data.AP_Cost);
-
-        // 쿨타임 등록 (엑셀에 적힌 CoolTime 값 적용)
-        if (data.CoolTime > 0)
-        {
-            skillCooldowns[skillID] = data.CoolTime;
-            Debug.Log($"[시스템] {data.Name} 사용! {data.CoolTime}턴의 쿨타임이 적용됩니다.");
-        }
-
-        BattleUI.Instance.UpdateAP(playerUnit.CurrentAP, playerUnit.MaxAP);
-
-        ICommand command = CommandFactory.GetCommand(data.CommandKey);
-        if (command != null)
-        {
-            command.Execute(playerUnit, enemyUnit, data);
-            BattleUI.Instance.UpdateHP(playerUnit, enemyUnit);
-            StartCoroutine(PostActionRoutine());
-        }
-    }
-
-    // 모든 스킬의 쿨타임을 1씩 줄이는 함수
-    private void ReduceCooldowns()
-    {
-        // Dictionary를 돌면서 0보다 큰 쿨타임을 모두 1씩 뺍니다.
-        List<int> keys = new List<int>(skillCooldowns.Keys);
-        foreach (int id in keys)
-        {
-            if (skillCooldowns[id] > 0)
-            {
-                skillCooldowns[id]--;
-            }
-        }
     }
 
     private IEnumerator PostActionRoutine()
     {
         yield return new WaitForSeconds(1f);
 
-        if (enemyUnit.CurrentHP <= 0) ChangeState(BattleState.Win);
+        if (enemyBoss.IsDead)
+        {
+            ChangeState(BattleState.Win);
+        }
+        //  둘 다 죽었을 때만 패배
+        else if (p1Unit.IsDead && p2Unit.IsDead)
+        {
+            ChangeState(BattleState.Lose);
+        }
         else
         {
-            if (playerUnit.CurrentAP > 0) ChangeState(BattleState.PlayerTurn);
-            else ChangeState(BattleState.EnemyTurn);
+            // 아군 턴 중에 AP가 남은 사람이 있으면 다시 플레이어 턴으로
+            if (p1Unit.CurrentAP > 0 || p2Unit.CurrentAP > 0)
+                ChangeState(BattleState.PlayerTurn);
+            else
+                ChangeState(BattleState.EnemyTurn);
         }
     }
 
-    private IEnumerator EnemyRoutine()
+    // --- 몬스터 AI (방장만 계산) ---
+    private IEnumerator MonsterAIRoutine()
     {
+        Debug.Log("[AI] 몬스터 행동 결정 중...");
         yield return new WaitForSeconds(1.5f);
-        playerUnit.TakeDamage(10);
-        BattleUI.Instance.UpdateHP(playerUnit, enemyUnit);
 
-        if (playerUnit.CurrentHP <= 0) ChangeState(BattleState.Lose);
-        else
+        if (PhotonNetwork.IsMasterClient)
         {
-            // 적의 턴이 끝나고 플레이어 턴으로 넘어가기 '직전'에만 쿨타임을 깎습니다.
-            ReduceCooldowns();
-            Debug.Log("[시스템] 한 라운드가 지나 모든 스킬의 쿨타임이 1턴 감소했습니다.");
+            // 살아있는 타겟 찾기
+            List<int> alivePlayers = new List<int>();
+            if (!p1Unit.IsDead) alivePlayers.Add(1);
+            if (!p2Unit.IsDead) alivePlayers.Add(2);
 
-            playerUnit.ResetAP();
-            ChangeState(BattleState.PlayerTurn);
+            if (alivePlayers.Count > 0)
+            {
+                int targetNum = alivePlayers[Random.Range(0, alivePlayers.Count)];
+                // RpcTarget.All을 써서 방장 화면에서도 데미지가 깎입니다.
+                photonView.RPC("SyncMonsterAction", RpcTarget.All, targetNum, 10f);
+            }
+            else
+            {
+                ChangeState(BattleState.Lose);
+            }
         }
+    }
+
+    [PunRPC]
+    public void SyncMonsterAction(int targetNum, float damage)
+    {
+        Unit target = (targetNum == 1) ? p1Unit : p2Unit;
+        target.TakeDamage(damage);
+
+        // UI 즉시 갱신
+        BattleUI.Instance.UpdateAllUI(p1Unit, p2Unit, enemyBoss);
+
+        // 몬스터 공격 연출 후 아군 턴으로 복귀
+        if (PhotonNetwork.IsMasterClient)
+        {
+            StartCoroutine(MonsterActionWait());
+        }
+    }
+    private IEnumerator MonsterActionWait()
+    {
+        yield return new WaitForSeconds(1f);
+        p1Unit.ResetAP();
+        p2Unit.ResetAP();
+        ChangeState(BattleState.PlayerTurn);
     }
 }

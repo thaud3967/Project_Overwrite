@@ -10,6 +10,10 @@ public class Unit : MonoBehaviourPun
     public int MaxAP = 3;
     public int CurrentAP;
 
+    [Header("능력치 배율")]
+    public float damageMultiplier = 1.0f; // 기본 데미지 배율 (1.0 = 100%)
+    public float defenseMultiplier = 1.0f; // 받는 데미지 감소율
+
     // 이 유닛이 내 유닛인지 확인
     public bool IsMine => photonView.IsMine;
 
@@ -30,10 +34,25 @@ public class Unit : MonoBehaviourPun
 
     public void TakeDamage(float amount)
     {
-        CurrentHP = Mathf.Clamp(CurrentHP - amount, 0, MaxHP);
-        Debug.Log($"[데미지] {UnitName}의 남은 HP: {CurrentHP}");
+        float finalDamage = amount * defenseMultiplier;
+
+        CurrentHP = Mathf.Clamp(CurrentHP - finalDamage, 0, MaxHP);
+        Debug.Log($"[데미지] {UnitName}이(가) {finalDamage}의 피해를 입음. 남은 HP: {CurrentHP}");
 
         if (IsDead) Die();
+    }
+    public void ApplyAugment(AugmentData data)
+    {
+        if (data == null) return;
+
+        // 스탯 보너스 적용
+        MaxHP += data.HealthBonus;
+        CurrentHP = Mathf.Min(CurrentHP + data.HealthBonus, MaxHP); // 늘어난 만큼 회복도 시켜줌
+        MaxAP += data.ApMaxBonus;
+        CurrentAP = Mathf.Min(CurrentAP + data.ApMaxBonus, MaxAP);
+        damageMultiplier += data.AtkPowerBonus;
+
+        Debug.Log($"<color=green>[증강 적용]</color> {UnitName}: 공격력 배율 {damageMultiplier * 100}%");
     }
 
     public void ConsumeAP(int amount) { CurrentAP -= amount; }

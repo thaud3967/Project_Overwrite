@@ -1,11 +1,14 @@
 using UnityEngine;
 using UnityEngine.UI;
 using System.Collections;
-using TMPro; // TMP 사용을 위해 필수
+using TMPro;
 
 public class BattleUI : MonoBehaviour
 {
     public static BattleUI Instance;
+    public GameObject restartButton;
+    [Header("스테이지 정보")]
+    public TextMeshProUGUI stageText;
 
     [Header("Player 1 상태 (방장)")]
     public Slider p1HpBar;
@@ -29,12 +32,20 @@ public class BattleUI : MonoBehaviour
     public GameObject resultPanel;
     public TextMeshProUGUI resultText;
 
+
     private void Awake()
     {
         if (Instance == null) Instance = this;
         else Destroy(gameObject);
 
         if (resultPanel != null) resultPanel.SetActive(false);
+    }
+    public void UpdateStageUI(int stage)
+    {
+        if (stageText != null)
+        {
+            stageText.text = $"STAGE {stage}";
+        }
     }
 
     public void UpdateAllUI(Unit p1, Unit p2, Unit enemy)
@@ -44,7 +55,6 @@ public class BattleUI : MonoBehaviour
         UpdateUnitStatus(enemy, enemyHpBar, enemyHpText, null, enemyNameText);
     }
 
-    // [중요] 매개변수 타입을 Text -> TextMeshProUGUI로 모두 변경했습니다.
     private void UpdateUnitStatus(Unit unit, Slider hpBar, TextMeshProUGUI hpText, TextMeshProUGUI apText, TextMeshProUGUI nameText)
     {
         if (unit == null) return;
@@ -66,7 +76,10 @@ public class BattleUI : MonoBehaviour
 
         if (unit.IsDead && hpBar != null)
         {
-            hpBar.targetGraphic.color = Color.gray;
+            if (hpBar.targetGraphic != null)
+            {
+                hpBar.targetGraphic.color = Color.gray;
+            }
         }
     }
 
@@ -93,6 +106,33 @@ public class BattleUI : MonoBehaviour
             resultPanel.SetActive(true);
             resultText.text = resultTitle;
             resultText.color = color;
+        }
+    }
+    public void ShowResult(string resultTitle, Color color, bool showRestart)
+    {
+        if (resultPanel != null)
+        {
+            resultPanel.SetActive(true);
+            resultText.text = resultTitle;
+            resultText.color = color;
+
+            // 승리했을 땐 안 보이고, 패배했을 때만 버튼이 보이게 설정 가능
+            if (restartButton != null) restartButton.SetActive(showRestart);
+        }
+    }
+    public void OnClickRestart()
+    {
+        // 방장만 재시작 권한을 갖게 하거나, 로비로 나가게 할 수 있습니다.
+        if (Photon.Pun.PhotonNetwork.IsMasterClient)
+        {
+            BattleManager.Instance.RequestRestart();
+        }
+    }
+    public void HideResult()
+    {
+        if (resultPanel != null)
+        {
+            resultPanel.SetActive(false);
         }
     }
 }

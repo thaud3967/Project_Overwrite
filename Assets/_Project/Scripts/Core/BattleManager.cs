@@ -305,6 +305,7 @@ public class BattleManager : MonoBehaviourPunCallbacks
         Unit target = (targetNum == 1) ? p1Unit : p2Unit;
         target.TakeDamage(damage);
 
+        BattleUI.Instance.ShowDamagePopup(target, damage);
         // UI 즉시 갱신
         BattleUI.Instance.UpdateAllUI(p1Unit, p2Unit, enemyBoss);
         if (CheckBattleResult()) return;

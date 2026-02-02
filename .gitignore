@@ -77,4 +77,4 @@ crashlytics-build.properties
 # Photon Server Settings (Sensitive Data)
 Assets/Photon/PhotonUnityNetworking/Resources/PhotonServerSettings.asset
 
-/Assets/
+/Assets/Asset/

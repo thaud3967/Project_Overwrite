@@ -32,7 +32,9 @@ public class BattleUI : MonoBehaviour
     public GameObject resultPanel;
     public TextMeshProUGUI resultText;
 
-
+    [Header("데미지 팝업")]
+    public GameObject popupPrefab;
+    public Transform popupContainer;
     private void Awake()
     {
         if (Instance == null) Instance = this;
@@ -133,6 +135,26 @@ public class BattleUI : MonoBehaviour
         if (resultPanel != null)
         {
             resultPanel.SetActive(false);
+        }
+    }
+
+    public void ShowDamagePopup(Unit targetUnit, float damage)
+    {
+        // 프리팹 생성 (부모는 popupContainer)
+        GameObject popup = Instantiate(popupPrefab, popupContainer);
+
+        // 위치 설정 (3D 월드 좌표 -> 2D 스크린 좌표 변환)
+        // Unit 오브젝트의 위치에서 Y축으로 조금 위(머리 위)를 잡습니다.
+        Vector3 worldPos = targetUnit.transform.position + Vector3.up * 2.0f;
+        Vector3 screenPos = Camera.main.WorldToScreenPoint(worldPos);
+        popup.transform.position = screenPos;
+
+        // 텍스트 설정
+        DamagePopup dpScript = popup.GetComponent<DamagePopup>();
+        if (dpScript != null)
+        {
+            // 20 이상이면 크리티컬(예시)로 취급
+            dpScript.Setup(damage, damage >= 20);
         }
     }
 }

@@ -37,6 +37,16 @@ public class Unit : MonoBehaviourPun
         float finalDamage = amount * defenseMultiplier;
 
         CurrentHP = Mathf.Clamp(CurrentHP - finalDamage, 0, MaxHP);
+        if (BattleUI.Instance != null)
+        {
+            BattleUI.Instance.ShowDamagePopup(this, finalDamage);
+        }
+        if (CameraShake.Instance != null)
+        {
+            float shakePower = (finalDamage > 20) ? 0.3f : 0.1f; // 강약 조절
+            float shakeTime = 0.2f; // 0.2초간 흔들림
+            CameraShake.Instance.Shake(shakeTime, shakePower);
+        }
         Debug.Log($"[데미지] {UnitName}이(가) {finalDamage}의 피해를 입음. 남은 HP: {CurrentHP}");
 
         if (IsDead) Die();

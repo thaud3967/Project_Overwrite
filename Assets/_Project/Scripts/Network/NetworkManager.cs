@@ -34,14 +34,12 @@ public class NetworkManager : MonoBehaviourPunCallbacks
     {
         Debug.Log("[네트워크] 로비 입장 완료. 이제 방에 입장할 수 있습니다.");
         // 테스트를 위해 바로 랜덤 방 입장을 시도합니다.
-        PhotonNetwork.JoinRandomRoom();
     }
 
     // 랜덤 방 입장 실패 시 (방이 없을 때) 호출
     public override void OnJoinRandomFailed(short returnCode, string message)
     {
         Debug.Log("[네트워크] 방이 없어 새로운 방을 생성합니다.");
-        PhotonNetwork.CreateRoom(null, new RoomOptions { MaxPlayers = 2 });
     }
 
     public override void OnJoinedRoom()

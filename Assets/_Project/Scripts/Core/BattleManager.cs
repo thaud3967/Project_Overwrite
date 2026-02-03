@@ -141,6 +141,8 @@ public class BattleManager : MonoBehaviourPunCallbacks
         Unit attacker = (playerNum == 1) ? p1Unit : p2Unit;
         Unit target = enemyBoss; // PvE이므로 타겟은 항상 보스
 
+        attacker.PlayAnim("Attack");
+
         SkillData data = SkillManager.Instance.GetSkill(skillID);
         if (data == null) return;
 
@@ -148,6 +150,19 @@ public class BattleManager : MonoBehaviourPunCallbacks
 
         ChangeState(BattleState.Action);
         attacker.ConsumeAP(data.AP_Cost);
+
+        // 스킬 사운드 재생
+        if (SoundManager.Instance != null && data.skillSound != null)
+        {
+            SoundManager.Instance.PlaySFX(data.skillSound);
+        }
+
+        // 스킬 이펙트 재생
+        if (EffectManager.Instance != null && !string.IsNullOrEmpty(data.vfxName))
+        {
+            // 일단 간단하게 '타겟' 위치에 이펙트 생성 (Attack 기준)
+            EffectManager.Instance.PlayVFX(data.vfxName, target.transform.position + Vector3.up);
+        }
 
         ICommand command = CommandFactory.GetCommand(data.CommandKey);
         if (command != null)
@@ -190,6 +205,7 @@ public class BattleManager : MonoBehaviourPunCallbacks
         Debug.Log("[전투] 아군 턴이 종료되었습니다.");
         p1Unit.CurrentAP = 0;
         p2Unit.CurrentAP = 0;
+        enemyBoss.ProcessStatusEffects();
         ChangeState(BattleState.EnemyTurn);
     }
 
@@ -223,6 +239,8 @@ public class BattleManager : MonoBehaviourPunCallbacks
     private IEnumerator SetupBattle()
     {
         yield return new WaitForSeconds(1f);
+        p1Unit.ProcessStatusEffects();
+        p2Unit.ProcessStatusEffects();
         p1Unit.ResetAP();
         p2Unit.ResetAP();
         ChangeState(BattleState.PlayerTurn);
@@ -258,7 +276,7 @@ public class BattleManager : MonoBehaviourPunCallbacks
                 int targetNum = alivePlayers[Random.Range(0, alivePlayers.Count)];
 
                 // 현재 스테이지 배율이 적용된 데미지 계산
-                float baseDamage = 10f;
+                float baseDamage = 30f;
                 float finalDamage = StageManager.Instance.GetScaledDamage(baseDamage);
 
                 // 결정된 정보를 모든 클라이언트에게 전송
@@ -295,7 +313,9 @@ public class BattleManager : MonoBehaviourPunCallbacks
 
         // UI 갱신
         BattleUI.Instance.UpdateAllUI(p1Unit, p2Unit, enemyBoss);
-
+        // 전투 분위기로 전환
+        if (SoundManager.Instance != null)
+            SoundManager.Instance.PlayBGM(SoundManager.Instance.bgmBattle);
         // 다시 증강 선택 단계로 돌아감!
         ChangeState(BattleState.AugmentSelect);
     }
@@ -303,6 +323,14 @@ public class BattleManager : MonoBehaviourPunCallbacks
     public void SyncMonsterAction(int targetNum, float damage)
     {
         Unit target = (targetNum == 1) ? p1Unit : p2Unit;
+
+        enemyBoss.PlayAnim("Attack");
+
+        if (EffectManager.Instance != null)
+        {
+            EffectManager.Instance.PlayVFX("Slash", target.transform.position + Vector3.up);
+        }
+
         target.TakeDamage(damage);
 
         BattleUI.Instance.ShowDamagePopup(target, damage);
@@ -353,6 +381,9 @@ public class BattleManager : MonoBehaviourPunCallbacks
             ChangeState(BattleState.Win);
             // 승리 시에는 재시작 버튼 안 보이게 (false)
             BattleUI.Instance.ShowResult("VICTORY", Color.yellow, false);
+            // 승리 브금
+            if (SoundManager.Instance != null)
+                SoundManager.Instance.PlayBGM(SoundManager.Instance.bgmVictory);
             StartCoroutine(HandleWinSequence()); // 승리 후 다음 스테이지 이동용
             return true;
         }
@@ -362,6 +393,9 @@ public class BattleManager : MonoBehaviourPunCallbacks
             ChangeState(BattleState.Lose);
             // 패배 시에는 재시작 버튼 보이게 (true)
             BattleUI.Instance.ShowResult("DEFEAT", Color.red, true);
+            // 패배 브금
+            if (SoundManager.Instance != null)
+                SoundManager.Instance.PlayBGM(SoundManager.Instance.bgmDefeat);
             return true;
         }
         return false; // 아직 승패가 안 남
@@ -373,5 +407,19 @@ public class BattleManager : MonoBehaviourPunCallbacks
         yield return new WaitForSeconds(2f);
         StageManager.Instance.NextStage();
         PrepareNextBattle();
+    }
+    public void BackToLobby()
+    {
+        Debug.Log("게임을 종료하고 로비로 돌아갑니다.");
+
+        // 방을 떠난다 (서버 연결은 유지)
+        PhotonNetwork.LeaveRoom();
+    }
+
+    // 방을 떠나는 데 성공하면 자동으로 호출됨
+    public override void OnLeftRoom()
+    {
+        // 로비 씬으로 이동
+        UnityEngine.SceneManagement.SceneManager.LoadScene("LobbyScene");
     }
 }

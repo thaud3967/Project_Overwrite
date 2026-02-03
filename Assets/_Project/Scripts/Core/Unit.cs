@@ -13,7 +13,8 @@ public class Unit : MonoBehaviourPun
     [Header("능력치 배율")]
     public float damageMultiplier = 1.0f; // 기본 데미지 배율 (1.0 = 100%)
     public float defenseMultiplier = 1.0f; // 받는 데미지 감소율
-
+    [Header("애니메이션")]
+    public Animator modelAnimator;
     // 이 유닛이 내 유닛인지 확인
     public bool IsMine => photonView.IsMine;
 
@@ -47,8 +48,20 @@ public class Unit : MonoBehaviourPun
             float shakeTime = 0.2f; // 0.2초간 흔들림
             CameraShake.Instance.Shake(shakeTime, shakePower);
         }
-        Debug.Log($"[데미지] {UnitName}이(가) {finalDamage}의 피해를 입음. 남은 HP: {CurrentHP}");
 
+        //  타격 이펙트 (Hit VFX) 
+        //if (EffectManager.Instance != null)
+        //{
+        //    EffectManager.Instance.PlayVFX("Hit", transform.position + Vector3.up);
+        //}
+
+        //  타격 사운드 (Hit SFX)
+        if (SoundManager.Instance != null)
+        {
+            SoundManager.Instance.PlaySFX(SoundManager.Instance.sfxHit);
+        }
+        Debug.Log($"[데미지] {UnitName}이(가) {finalDamage}의 피해를 입음. 남은 HP: {CurrentHP}");
+        PlayAnim("Hit");
         if (IsDead) Die();
     }
     public void ApplyAugment(AugmentData data)
@@ -72,13 +85,51 @@ public class Unit : MonoBehaviourPun
     {
         ActiveStatuses.Add(new StatusEffect(type, duration, value));
     }
+    public void PlayAnim(string triggerName)
+    {
+        if (modelAnimator != null)
+        {
+            modelAnimator.SetTrigger(triggerName);
+        }
+    }
+    public void ProcessStatusEffects()
+    {
+        // 리스트를 거꾸로 돌면서 처리
+        for (int i = ActiveStatuses.Count - 1; i >= 0; i--)
+        {
+            StatusEffect effect = ActiveStatuses[i];
 
+            // 효과 발동
+            switch (effect.Type)
+            {
+                case StatusType.Burn:
+                    TakeDamage(effect.Value); // 데미지 입기
+                    Debug.Log($"[상태이상] {UnitName} 화상 데미지 {effect.Value}!");
+                    break;
+                case StatusType.Poison:
+                    // 독 로직 (기능 추가)
+                    break;
+            }
+
+            // 턴 감소
+            effect.Duration--;
+
+            // 지속시간 끝났으면 제거
+            if (effect.Duration <= 0)
+            {
+                ActiveStatuses.RemoveAt(i);
+                Debug.Log($"[상태이상] {UnitName}의 {effect.Type} 효과가 사라졌습니다.");
+            }
+        }
+    }
     private void Die()
     {
         Debug.Log($"[사망] {UnitName}이(가) 쓰러졌습니다.");
 
-        // 시각적으로만 죽은 것처럼 보이게 합니다.
-        // 예: 90도 눕히기
-        transform.rotation = Quaternion.Euler(0, 0, 90f);
+        PlayAnim("Die");
+
+        //transform.rotation = Quaternion.Euler(0, 0, 90f);
     }
+
+
 }

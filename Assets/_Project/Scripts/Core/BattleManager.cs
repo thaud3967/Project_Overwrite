@@ -33,6 +33,7 @@ public class BattleManager : MonoBehaviourPunCallbacks
 
     private void Start()
     {
+        PhotonNetwork.AutomaticallySyncScene = true;
         if (PhotonNetwork.IsConnected)
             ChangeState(BattleState.Start);
     }
@@ -127,6 +128,11 @@ public class BattleManager : MonoBehaviourPunCallbacks
     {
         // 쿨타임/AP 체크는 로컬에서 먼저 수행하여 반응속도 확보
         Unit attacker = (playerNum == 1) ? p1Unit : p2Unit;
+        if (attacker.IsDead)
+        {
+            Debug.Log("죽은 상태라 공격할 수 없습니다.");
+            return;
+        }
         SkillData data = SkillManager.Instance.GetSkill(skillID);
 
         if (attacker.CurrentAP < data.AP_Cost) return;
@@ -199,6 +205,19 @@ public class BattleManager : MonoBehaviourPunCallbacks
             augmentUI.ShowRandomAugments(); 
         }
     }
+    [PunRPC]
+    public void SyncStartTurn()
+    {
+        // 양쪽 모두 AP 꽉 채우기
+        p1Unit.ResetAP();
+        p2Unit.ResetAP();
+
+        // 턴 상태 변경
+        ChangeState(BattleState.PlayerTurn);
+
+        Debug.Log("[전투] 플레이어 턴 시작! AP가 회복되었습니다.");
+    }
+
     [PunRPC]
     public void SyncEndTurn()
     {
@@ -303,6 +322,9 @@ public class BattleManager : MonoBehaviourPunCallbacks
         HealUnit(p1Unit, 20f);
         HealUnit(p2Unit, 20f);
 
+        p1Unit.ActiveStatuses.Clear();
+        p2Unit.ActiveStatuses.Clear();
+
         // 적 유닛 부활 및 스탯 스케일링
         enemyBoss.transform.rotation = Quaternion.identity; // 누워있던 보스 세우기
 
@@ -311,6 +333,7 @@ public class BattleManager : MonoBehaviourPunCallbacks
         enemyBoss.MaxHP = scaledHP;
         enemyBoss.CurrentHP = scaledHP;
 
+        enemyBoss.ActiveStatuses.Clear();
         // UI 갱신
         BattleUI.Instance.UpdateAllUI(p1Unit, p2Unit, enemyBoss);
         // 전투 분위기로 전환
@@ -351,9 +374,7 @@ public class BattleManager : MonoBehaviourPunCallbacks
     private IEnumerator MonsterActionWait()
     {
         yield return new WaitForSeconds(1f);
-        p1Unit.ResetAP();
-        p2Unit.ResetAP();
-        ChangeState(BattleState.PlayerTurn);
+        photonView.RPC("SyncStartTurn", RpcTarget.All);
     }
     public void RequestRestart()
     {
@@ -366,12 +387,10 @@ public class BattleManager : MonoBehaviourPunCallbacks
         // 데이터 초기화
         StageManager.Instance.ResetStage();
 
+        BattleUI.Instance.HideResult();
         // 현재 씬을 다시 로드 (포톤 전용 함수)
         // 씬 이름을 정확히 적어주세요. 예: "BattleScene"
-        if (PhotonNetwork.IsMasterClient)
-        {
-            PhotonNetwork.LoadLevel(UnityEngine.SceneManagement.SceneManager.GetActiveScene().name);
-        }
+        UnityEngine.SceneManagement.SceneManager.LoadScene("BattleScene");
     }
     private bool CheckBattleResult()
     {
@@ -415,7 +434,57 @@ public class BattleManager : MonoBehaviourPunCallbacks
         // 방을 떠난다 (서버 연결은 유지)
         PhotonNetwork.LeaveRoom();
     }
+    public override void OnPlayerEnteredRoom(Photon.Realtime.Player newPlayer)
+    {
+        Debug.LogWarning($"[시스템] {newPlayer.NickName}님이 난입했습니다.");
 
+        if (PhotonNetwork.IsMasterClient)
+        {
+            // 방장(P1)이 현재 게임의 족보(HP, 증강스탯, 스테이지 등)를 P2에게 쏴줍니다.
+            photonView.RPC("SyncRoomState", newPlayer,
+                StageManager.Instance.currentStage,
+                enemyBoss.CurrentHP, enemyBoss.MaxHP,
+                p1Unit.CurrentHP, p1Unit.MaxHP, p1Unit.CurrentAP, p1Unit.MaxAP, p1Unit.damageMultiplier,
+                p2Unit.CurrentHP, p2Unit.MaxHP, p2Unit.CurrentAP, p2Unit.MaxAP, p2Unit.damageMultiplier
+            );
+        }
+    }
+
+    [PunRPC]
+    public void SyncRoomState(int stage, float bossHP, float bossMax,
+                              float p1HP, float p1MaxHP, int p1AP, int p1MaxAP, float p1Dmg,
+                              float p2HP, float p2MaxHP, int p2AP, int p2MaxAP, float p2Dmg)
+    {
+        Debug.Log("방장에게서 현재 게임 상태를 동기화받았습니다.");
+
+        // 스테이지 동기화
+        if (StageManager.Instance != null) StageManager.Instance.currentStage = stage;
+
+        // 보스 동기화 (MaxHP도 같이 맞춰야 증강 적용된 게 보임)
+        enemyBoss.MaxHP = bossMax;
+        enemyBoss.CurrentHP = bossHP;
+
+        // P1 상태 동기화
+        p1Unit.MaxHP = p1MaxHP;
+        p1Unit.CurrentHP = p1HP;
+        p1Unit.MaxAP = p1MaxAP;
+        p1Unit.CurrentAP = p1AP;
+        p1Unit.damageMultiplier = p1Dmg;
+
+        // P2 상태 동기화
+        p2Unit.MaxHP = p2MaxHP;
+        p2Unit.CurrentHP = p2HP;
+        p2Unit.MaxAP = p2MaxAP;
+        p2Unit.CurrentAP = p2AP;
+        p2Unit.damageMultiplier = p2Dmg;
+
+        // UI 싹 갱신
+        if (BattleUI.Instance != null)
+        {
+            BattleUI.Instance.UpdateStageUI(stage);
+            BattleUI.Instance.UpdateAllUI(p1Unit, p2Unit, enemyBoss);
+        }
+    }
     // 방을 떠나는 데 성공하면 자동으로 호출됨
     public override void OnLeftRoom()
     {
